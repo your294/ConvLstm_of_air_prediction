@@ -11,7 +11,7 @@ pollution_data = pd.read_excel("../河南空气质量数据(2019-01~2021-09).xls
 he_nan_pos = ['三门峡', '信阳', '南阳', '周口', '商丘']
 start_time = datetime.datetime(2019, 1, 1, 0, 0)
 delta = datetime.timedelta(hours=1)
-times = 365 * 24
+times = 365 * 24 * 2
 
 
 def generate_files(data_frame, string):
@@ -24,7 +24,7 @@ def generate_files(data_frame, string):
         df_arr.append(new_df)
     idx = 0
     for df in df_arr:
-        df.to_excel(f'../he_nan_data/{string}/{he_nan_pos[idx]}_{string}.xlsx')
+        df.to_excel(f'../he_nan_data/{string}/{he_nan_pos[idx]}_{string}.xlsx', index=False)
         idx += 1
 
 

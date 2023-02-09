@@ -4,23 +4,23 @@ from matplotlib import pyplot
 import os
 
 print(os.getcwd())
-san_men = pd.read_csv('../he_nan_data/clean_pollute/san_men_clean.csv')
-xin_yang = pd.read_csv('../he_nan_data/clean_pollute/xin_yang_clean.csv')
-nan_yang = pd.read_csv('../he_nan_data/clean_pollute/nan_yang_clean.csv')
-zhou_kou = pd.read_csv('../he_nan_data/clean_pollute/zhou_kou_clean.csv')
-shang_qiu = pd.read_csv('../he_nan_data/clean_pollute/shang_qiu_clean.csv')
+san_men = pd.read_csv('../he_nan_data/clean_pollute2/san_men_clean.csv')
+xin_yang = pd.read_csv('../he_nan_data/clean_pollute2/xin_yang_clean.csv')
+nan_yang = pd.read_csv('../he_nan_data/clean_pollute2/nan_yang_clean.csv')
+zhou_kou = pd.read_csv('../he_nan_data/clean_pollute2/zhou_kou_clean.csv')
+shang_qiu = pd.read_csv('../he_nan_data/clean_pollute2/shang_qiu_clean.csv')
 
-san_men = san_men[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co']]
-xin_yang = xin_yang[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co']]
-nan_yang = nan_yang[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co']]
-zhou_kou = zhou_kou[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co']]
-shang_qiu = shang_qiu[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co']]
+san_men = san_men[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']]
+xin_yang = xin_yang[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']]
+nan_yang = nan_yang[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']]
+zhou_kou = zhou_kou[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']]
+shang_qiu = shang_qiu[['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']]
 
-col_san_men = ['aqi_s', 'pm2_5_s', 'pm10_s', 'so2_s', 'no2_s', 'co_s']
-col_xin_yang = ['aqi_x', 'pm2_5_x', 'pm10_x', 'so2_x', 'no2_x', 'co_x']
-col_nan_yang = ['aqi_n', 'pm2_5_n', 'pm10_n', 'so2_n', 'no2_n', 'co_n']
-col_zhou_kou = ['aqi_z', 'pm2_5_z', 'pm10_z', 'so2_z', 'no2_z', 'co_z']
-col_shang_qiu = ['aqi_q', 'pm2_5_q', 'pm10_q', 'so2_q', 'no2_q', 'co_q']
+col_san_men = ['aqi_s', 'pm2_5_s', 'pm10_s', 'so2_s', 'no2_s', 'co_s', 'temp_s', 'humi_s', 'pressure_s']
+col_xin_yang = ['aqi_x', 'pm2_5_x', 'pm10_x', 'so2_x', 'no2_x', 'co_x', 'temp_x', 'humi_x', 'pressure_x']
+col_nan_yang = ['aqi_n', 'pm2_5_n', 'pm10_n', 'so2_n', 'no2_n', 'co_n', 'temp_n', 'humi_n', 'pressure_n']
+col_zhou_kou = ['aqi_z', 'pm2_5_z', 'pm10_z', 'so2_z', 'no2_z', 'co_z', 'temp_z', 'humi_z', 'pressure_z']
+col_shang_qiu = ['aqi_q', 'pm2_5_q', 'pm10_q', 'so2_q', 'no2_q', 'co_q', 'temp_q', 'humi_q', 'pressure_q']
 
 san_men.columns = col_san_men
 xin_yang.columns = col_xin_yang
@@ -163,11 +163,11 @@ for seq, label in train_inout_sequence:
 seqList = np.array(seqList)
 labelList = np.array(labelList)
 n_steps = 24
-n_outputs = 30
+n_outputs = 45
 model = model_build(seqList, labelList, n_steps, n_outputs)
 epochs_num = 15
 batch_size_set = 1
-weight_path = '../try_code/He_Nan_ConvLSTM_weight.h5'
+weight_path = '../try_code/He_Nan_ConvLSTM_weight_2.h5'
 # weight_path = ''
 isTrain = False
 if isTrain:
@@ -196,14 +196,14 @@ test_x = np.array(test_x)
 test_x = test_x.reshape(test_x.shape[0], 24, 10, n_outputs, 1)
 test_y = np.array(test_y)
 test_y = test_y.reshape(test_y.shape[0], test_y.shape[2])
-test_y = test_y[:, :6]
+test_y = test_y[:, :9]
 
 
 def show_graph(yhat, test_y):
     # air_pollute_list = ['nox', 'no2', 'no', 'o3', 'pm2.5']
-    air_pollute_list = ['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co']
+    air_pollute_list = ['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']
 
-    pyplot.figure(figsize=(14, 14))
+    pyplot.figure(figsize=(28, 14))
     i = 1
     for column in air_pollute_list:
         pyplot.subplot(len(air_pollute_list), 1, i)
@@ -215,9 +215,8 @@ def show_graph(yhat, test_y):
 
 
 yhat = model.predict(test_x)
-yhat = yhat[:, :, :6]
+yhat = yhat[:, :, :9]
 yhat = yhat.reshape(yhat.shape[0], yhat.shape[2])
-show_graph(yhat, test_y)
 
 
 def acc15(yhat, test_y, idx):
