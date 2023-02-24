@@ -78,14 +78,14 @@ print('The length of train data, validation data and test data are:', len(train_
       len(test_data))
 
 train_window = 240
-
+pred_time = 12
 
 def create_train_sequence(input_data, tw):
     inout_seq = []
     L = len(input_data)
-    for i in range(L - tw):
+    for i in range(L - tw - pred_time):
         train_seq = input_data[i:i + tw]
-        train_label = input_data[i + tw:i + tw + 1]
+        train_label = input_data[i + tw:i + tw + pred_time, :9]
         inout_seq.append((train_seq, train_label))
     return inout_seq
 
@@ -98,9 +98,9 @@ def create_val_sequence(train_data, val_data, tw):
     temp = np.concatenate((train_data, val_data))  # 先将训练集和测试集合并
     inout_seq = []
     L = len(val_data)
-    for i in range(L):
-        val_seq = temp[-(train_window + L) + i:-L + i]
-        val_label = test_data[i:i + 1]
+    for i in range(L - pred_time):
+        val_seq = temp[-(train_window + L) + i + pred_time:-L + i + pred_time]
+        val_label = test_data[i:i + pred_time, :9]
         inout_seq.append((val_seq, val_label))
 
     return inout_seq
@@ -118,9 +118,9 @@ def create_test_sequence(train_data, val_data, test_data, tw):
     temp = np.concatenate((temp, test_data))
     inout_seq = []
     L = len(test_data)
-    for i in range(L):
-        test_seq = temp[-(train_window + L) + i:-L + i]
-        test_label = test_data[i:i + 1]
+    for i in range(L - pred_time):
+        test_seq = temp[-(train_window + L) + i + pred_time:-L + i + pred_time]
+        test_label = test_data[i:i + pred_time, :9]
         inout_seq.append((test_seq, test_label))
 
     return inout_seq
@@ -146,7 +146,7 @@ def model_build(train_x, train_y, n_steps, in_outputs):
     model.add(RepeatVector(n_outputs))
     model.add(LSTM(200, activation='relu', return_sequences=True))
     model.add(Dense(100, activation='relu'))
-    model.add(Dense(in_outputs, activation='relu'))
+    model.add(Dense(9 * pred_time, activation='relu'))
     print(model.output_shape)
 
     model.compile(loss='mse', optimizer='adam', metrics=['mae', 'acc'])
@@ -158,6 +158,7 @@ seqList = []
 labelList = []
 for seq, label in train_inout_sequence:
     seqList.append(seq)
+    label = label.reshape(1, label.shape[0] * label.shape[1])
     labelList.append(label)
 
 seqList = np.array(seqList)
@@ -167,14 +168,14 @@ n_outputs = 45
 model = model_build(seqList, labelList, n_steps, n_outputs)
 epochs_num = 15
 batch_size_set = 1
-weight_path = '../try_code/He_Nan_ConvLSTM_weight_2.h5'
+weight_path = 'He_Nan_ConvLSTM_weight_12hours.h5'
 # weight_path = ''
 isTrain = False
 if isTrain:
     with tf.device("/gpu:0"):
         train_x1, train_y1 = seqList, labelList
         train_x1 = train_x1.reshape((train_x1.shape[0], n_steps, 10, n_outputs, 1))
-        train_y1 = labelList.reshape(labelList.shape[0], labelList.shape[2])
+        # train_y1 = labelList.reshape(labelList.shape[0], labelList.shape[2])
         # train_y1 = train_y1[:, :5]
         model.fit(train_x1, train_y1,
                   epochs=epochs_num, batch_size=batch_size_set, verbose=2)
@@ -191,19 +192,20 @@ test_x = []
 test_y = []
 for seq, label in test_inout_seq:
     test_x.append(seq)
+    label = label.reshape(1, label.shape[0] * label.shape[1])
     test_y.append(label)
 test_x = np.array(test_x)
 test_x = test_x.reshape(test_x.shape[0], 24, 10, n_outputs, 1)
 test_y = np.array(test_y)
-test_y = test_y.reshape(test_y.shape[0], test_y.shape[2])
-test_y = test_y[:, :9]
+# test_y = test_y.reshape(test_y.shape[0], test_y.shape[2])
+# test_y = test_y[:, :, :9]
 
 
 def show_graph(yhat, test_y):
     # air_pollute_list = ['nox', 'no2', 'no', 'o3', 'pm2.5']
     air_pollute_list = ['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']
 
-    pyplot.figure(figsize=(28, 14))
+    pyplot.figure(figsize=(14, 14))
     i = 1
     for column in air_pollute_list:
         pyplot.subplot(len(air_pollute_list), 1, i)
@@ -214,11 +216,6 @@ def show_graph(yhat, test_y):
     pyplot.show()
 
 
-yhat = model.predict(test_x)
-yhat = yhat[:, :, :9]
-yhat = yhat.reshape(yhat.shape[0], yhat.shape[2])
-
-
 def acc15(yhat, test_y, idx):
     cnt = 0
     for i in range(int(len(test_y))):
@@ -227,11 +224,24 @@ def acc15(yhat, test_y, idx):
     return cnt / int(len(test_y))
 
 
-res = []
-for i in range(0, test_y.shape[1], 1):
-    acc = acc15(yhat, test_y, i)
-    res.append(acc)
+yhat = model.predict(test_x)
 
-print(res)
-print(yhat)
-print(test_y)
+
+
+for i in range(0, 12, 1):
+    ypre = yhat[:, :, i * 9:(i + 1) * 9]
+    yp = ypre.reshape(ypre.shape[0], ypre.shape[2])
+    ylabel = test_y[:, :, i * 9:(i + 1) * 9]
+    yl = ylabel.reshape(ylabel.shape[0], ylabel.shape[2])
+    show_graph(yp, yl)
+    pyplot.savefig(f'./img/{i}_12hours.png')
+    pyplot.close()
+    res = []
+    for i in range(0, yp.shape[1], 1):
+        acc = acc15(yp, yl, i)
+        res.append(acc)
+    print(res)
+
+
+
+
