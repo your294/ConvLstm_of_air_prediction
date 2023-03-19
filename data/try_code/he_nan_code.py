@@ -39,7 +39,7 @@ from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
 from keras.models import Model, Sequential
 from keras.layers import Input, Dense, BatchNormalization, Add, TimeDistributed, MaxPooling2D, concatenate, \
-    MaxPooling1D, Conv1D, LSTM, Flatten, RepeatVector, Reshape
+    MaxPooling1D, Conv1D, LSTM, Flatten, RepeatVector, Reshape, Softmax, Lambda, Attention
 from keras.layers import ConvLSTM2D, Conv2D, Dropout, UpSampling2D
 
 # tf.debugging.set_log_device_placement(True)
@@ -78,14 +78,15 @@ print('The length of train data, validation data and test data are:', len(train_
       len(test_data))
 
 train_window = 240
+pred_time = 12
 
 
 def create_train_sequence(input_data, tw):
     inout_seq = []
     L = len(input_data)
-    for i in range(L - tw):
+    for i in range(L - tw - pred_time):
         train_seq = input_data[i:i + tw]
-        train_label = input_data[i + tw:i + tw + 1]
+        train_label = input_data[i + tw:i + tw + pred_time, :9]
         inout_seq.append((train_seq, train_label))
     return inout_seq
 
@@ -98,11 +99,10 @@ def create_val_sequence(train_data, val_data, tw):
     temp = np.concatenate((train_data, val_data))  # 先将训练集和测试集合并
     inout_seq = []
     L = len(val_data)
-    for i in range(L):
-        val_seq = temp[-(train_window + L) + i:-L + i]
-        val_label = test_data[i:i + 1]
+    for i in range(0, L - pred_time, pred_time):
+        val_seq = temp[-(tw + L) + i + pred_time:-L + i + pred_time]
+        val_label = test_data[i:i + pred_time, :9]
         inout_seq.append((val_seq, val_label))
-
     return inout_seq
 
 
@@ -118,71 +118,71 @@ def create_test_sequence(train_data, val_data, test_data, tw):
     temp = np.concatenate((temp, test_data))
     inout_seq = []
     L = len(test_data)
-    for i in range(L):
-        test_seq = temp[-(train_window + L) + i:-L + i]
-        test_label = test_data[i:i + 1]
+    for i in range(0, L - pred_time, pred_time):
+        test_seq = temp[-(tw + L) + i + pred_time:-L + i + pred_time]
+        test_label = test_data[i:i + pred_time, :9]
         inout_seq.append((test_seq, test_label))
-
     return inout_seq
 
 
 test_inout_seq = create_test_sequence(train_data, val_data, test_data, train_window)
-print('The total number of validation windows is', len(val_inout_seq))
+print('The total number of test windows is', len(test_inout_seq))
 
 
-# n_length = 40
-# n_steps = 24
-# 构建网络模型ConvLSTM
-def model_build(train_x, train_y, n_steps, in_outputs):
-    # [samples，timesteps，rows，cols，channels] = [train_x.shape[0] = 13776, 24, 10, 40,1]
-    # n_timesteps, n_features, n_outputs = train_x.shape[1], train_x.shape[2], train_y.shape[1]
-    n_timesteps, n_features, n_outputs = train_x.shape[1], 1, train_y.shape[1]
-    # train_x = train_x.reshape((train_x.shape[0], n_steps, int(n_timesteps / n_steps), n_length, n_features))
-    # train_y = train_y.reshape((train_y.shape[0], train_y.shape[2], 1))
-    model = Sequential()
-    model.add(ConvLSTM2D(filters=64, kernel_size=(1, 3), activation='relu',
-                         input_shape=(n_steps, 10, in_outputs, n_features)))
-    model.add(Flatten())
-    model.add(RepeatVector(n_outputs))
-    model.add(LSTM(200, activation='relu', return_sequences=True))
-    model.add(Dense(100, activation='relu'))
-    model.add(Dense(in_outputs, activation='relu'))
-    print(model.output_shape)
+def new_model_build(train_x, train_y, n_steps, in_outputs):
+    train_x = train_x.reshape((train_x.shape[0], n_steps, 10, in_outputs, 1))
+    train_y = train_y.reshape(train_y.shape[0], train_y.shape[1])
+    n_timesteps, n_features, n_outputs = train_x.shape[1], 1, 1
+    inputs = Input(shape=(train_x.shape[1], train_x.shape[2], train_x.shape[3], train_x.shape[4]))
+    conv_lstm1 = ConvLSTM2D(filters=64, kernel_size=(1, 3), activation='relu',
+                            return_sequences=True)(inputs)
+    attention_pre = Dense(64, name='attention_vec')(conv_lstm1)  # [b_size,maxlen,1]
+    attention_probs = Softmax()(attention_pre)  # [b_size,maxlen,1]
+    attention_mul = Lambda(lambda x: x[0] * x[1])([attention_probs, conv_lstm1])
+    flatten = Flatten()(attention_mul)
+    repeater = RepeatVector(n_outputs)(flatten)
+    lstm = LSTM(200, activation='relu', return_sequences=True)(repeater)
+    dense1 = Dense(100, activation='relu')(lstm)
+    x_output = Dense(pred_time, activation='relu')(dense1)
+    model = Model(inputs=inputs, outputs=x_output)
 
     model.compile(loss='mse', optimizer='adam', metrics=['mae', 'acc'])
-    print(model.summary())
+    model.summary()
     return model
 
 
+idx_target = 1
 seqList = []
 labelList = []
 for seq, label in train_inout_sequence:
     seqList.append(seq)
-    labelList.append(label)
+    labelList.append(label[:, idx_target])
 
 seqList = np.array(seqList)
 labelList = np.array(labelList)
 n_steps = 24
 n_outputs = 45
-model = model_build(seqList, labelList, n_steps, n_outputs)
-epochs_num = 15
+
+model = new_model_build(seqList, labelList, n_steps, n_outputs)
+epochs_num = 5
 batch_size_set = 1
-weight_path = '../try_code/He_Nan_ConvLSTM_weight_2.h5'
+weight_path = f'./weight_of_target/weight_{idx_target}.h5'
 # weight_path = ''
-isTrain = False
+isTrain = True
 if isTrain:
     with tf.device("/gpu:0"):
         train_x1, train_y1 = seqList, labelList
         train_x1 = train_x1.reshape((train_x1.shape[0], n_steps, 10, n_outputs, 1))
-        train_y1 = labelList.reshape(labelList.shape[0], labelList.shape[2])
-        # train_y1 = train_y1[:, :5]
         model.fit(train_x1, train_y1,
                   epochs=epochs_num, batch_size=batch_size_set, verbose=2)
     try:
         os.remove(weight_path)
     except:
         print(f'no such files in path')
-    model.save_weights(weight_path)
+    try:
+        model.save_weights(weight_path)
+    except:
+        model.save(f'./weight_{idx_target}.h5')
 else:
     model.summary()
     model.load_weights(weight_path)
@@ -191,47 +191,33 @@ test_x = []
 test_y = []
 for seq, label in test_inout_seq:
     test_x.append(seq)
-    test_y.append(label)
+    test_y.append(label[:, idx_target])
 test_x = np.array(test_x)
 test_x = test_x.reshape(test_x.shape[0], 24, 10, n_outputs, 1)
 test_y = np.array(test_y)
-test_y = test_y.reshape(test_y.shape[0], test_y.shape[2])
-test_y = test_y[:, :9]
 
 
-def show_graph(yhat, test_y):
-    # air_pollute_list = ['nox', 'no2', 'no', 'o3', 'pm2.5']
+def show_hours_graph(yhat, test_y):
     air_pollute_list = ['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']
-
-    pyplot.figure(figsize=(28, 14))
-    i = 1
-    for column in air_pollute_list:
-        pyplot.subplot(len(air_pollute_list), 1, i)
-        pyplot.title(column, y=0.5, loc='right')
-        pyplot.plot(yhat[:, i - 1], color='red', label='prediction')
-        pyplot.plot(test_y[:, i - 1], color='blue', label='actual')
-        i += 1
+    pyplot.figure(figsize=(14, 14))
+    for hours in range(0, 12, 1):
+        pyplot.subplot(pred_time, 1, hours + 1)
+        pyplot.title(f'{hours + 1}h', y=0.5, loc='right')
+        pyplot.plot(yhat[:, hours], color='red', label='prediction')
+        pyplot.plot(test_y[:, hours], color='blue', label='fact')
     pyplot.show()
+    pyplot.savefig(f'./img/new_{idx_target}.png')
 
 
 yhat = model.predict(test_x)
-yhat = yhat[:, :, :9]
 yhat = yhat.reshape(yhat.shape[0], yhat.shape[2])
+show_hours_graph(yhat, test_y)
 
-
-def acc15(yhat, test_y, idx):
-    cnt = 0
-    for i in range(int(len(test_y))):
-        if test_y[i][idx] * 0.80 < yhat[i][idx] < test_y[i][idx] * 1.2:
-            cnt += 1
-    return cnt / int(len(test_y))
-
-
-res = []
-for i in range(0, test_y.shape[1], 1):
-    acc = acc15(yhat, test_y, i)
-    res.append(acc)
-
-print(res)
-print(yhat)
-print(test_y)
+# cal acc15
+true_cnt = [0 for _ in range(pred_time)]
+row, col = test_y.shape[0], test_y.shape[1]
+for i in range(col):
+    for j in range(row):
+        if test_y[j][i] * 0.80 <= yhat[j][i] <= test_y[j][i] * 1.20:
+            true_cnt[i] += 1
+    print(true_cnt[i] / row)
