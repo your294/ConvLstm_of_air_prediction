@@ -1,7 +1,10 @@
 import pandas as pd
 import numpy as np
+from keras.utils.vis_utils import plot_model
 from matplotlib import pyplot
 import os
+
+from matplotlib.ticker import MultipleLocator
 
 print(os.getcwd())
 san_men = pd.read_csv('../he_nan_data/clean_pollute2/san_men_clean.csv')
@@ -34,7 +37,6 @@ dataset = dataset.join(zhou_kou)
 dataset = dataset.join(shang_qiu)
 print(dataset.shape)
 
-import os
 from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
 from keras.models import Model, Sequential
@@ -60,6 +62,15 @@ var_origin = dataset.values
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled = scaler.fit_transform(var_origin)
 var = scaled
+
+
+# reverse_transform 逆归一化
+def reverse_transform(data, sca_data):
+    mx, mn = np.max(data), np.min(data)
+    std_data = np.full(len(sca_data), 0)
+    for idx in range(len(sca_data)):
+        std_data[idx] = sca_data[idx] * (mx - mn) + mn
+    return std_data
 
 
 # 划分数据集，验证集，测试集
@@ -134,24 +145,25 @@ def new_model_build(train_x, train_y, n_steps, in_outputs):
     train_y = train_y.reshape(train_y.shape[0], train_y.shape[1])
     n_timesteps, n_features, n_outputs = train_x.shape[1], 1, 1
     inputs = Input(shape=(train_x.shape[1], train_x.shape[2], train_x.shape[3], train_x.shape[4]))
-    conv_lstm1 = ConvLSTM2D(filters=64, kernel_size=(1, 3), activation='relu',
-                            return_sequences=True)(inputs)
-    attention_pre = Dense(64, name='attention_vec')(conv_lstm1)  # [b_size,maxlen,1]
-    attention_probs = Softmax()(attention_pre)  # [b_size,maxlen,1]
-    attention_mul = Lambda(lambda x: x[0] * x[1])([attention_probs, conv_lstm1])
-    flatten = Flatten()(attention_mul)
-    repeater = RepeatVector(n_outputs)(flatten)
+    conv_lstm1 = ConvLSTM2D(filters=64, kernel_size=(1, 3), activation='relu', return_sequences=True)(inputs)
+    conv_lstm2 = ConvLSTM2D(filters=32, kernel_size=(1, 3), activation='relu')(conv_lstm1)
+    # attention_pre = Dense(64, name='attention_vec')(conv_lstm1)  # [b_size,maxlen,1]
+    # attention_probs = Softmax()(attention_pre)  # [b_size,maxlen,1]
+    # attention_mul = Lambda(lambda x: x[0] * x[1])([attention_probs, conv_lstm1])
+    flatten = Flatten()(conv_lstm2)
+    repeater = RepeatVector(1)(flatten)
     lstm = LSTM(200, activation='relu', return_sequences=True)(repeater)
-    dense1 = Dense(100, activation='relu')(lstm)
-    x_output = Dense(pred_time, activation='relu')(dense1)
+    dense1 = TimeDistributed(Dense(100, activation='relu'))(lstm)
+    x_output = TimeDistributed(Dense(pred_time, activation='relu'))(dense1)
     model = Model(inputs=inputs, outputs=x_output)
 
     model.compile(loss='mse', optimizer='adam', metrics=['mae', 'acc'])
     model.summary()
+    plot_model(model, to_file='./img/conv_lstm2.png', show_shapes=True, show_layer_names='True', rankdir="TB")
     return model
 
 
-idx_target = 1
+idx_target = 5
 seqList = []
 labelList = []
 for seq, label in train_inout_sequence:
@@ -164,11 +176,11 @@ n_steps = 24
 n_outputs = 45
 
 model = new_model_build(seqList, labelList, n_steps, n_outputs)
-epochs_num = 5
+epochs_num = 3
 batch_size_set = 1
 weight_path = f'./weight_of_target/weight_{idx_target}.h5'
 # weight_path = ''
-isTrain = True
+isTrain = False
 if isTrain:
     with tf.device("/gpu:0"):
         train_x1, train_y1 = seqList, labelList
@@ -197,27 +209,65 @@ test_x = test_x.reshape(test_x.shape[0], 24, 10, n_outputs, 1)
 test_y = np.array(test_y)
 
 
-def show_hours_graph(yhat, test_y):
+# def show_hours_graph(yhat, test_y):
+#     air_pollute_list = ['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']
+#     pyplot.figure(figsize=(14, 14))
+#     for hours in range(0, 12, 1):
+#         pyplot.subplot(pred_time, 1, hours + 1)
+#         pyplot.title(f'{hours + 1}h', y=0.5, loc='right')
+#         pyplot.plot(yhat[:, hours], color='red', label='prediction')
+#         pyplot.plot(test_y[:, hours], color='blue', label='fact')
+#     pyplot.show()
+#     pyplot.savefig(f'./img/new_{idx_target}.png')
+
+
+def show_graph(predict, test):
     air_pollute_list = ['aqi', 'pm2_5', 'pm10', 'so2', 'no2', 'co', 'temp', 'humi', 'pressure']
-    pyplot.figure(figsize=(14, 14))
-    for hours in range(0, 12, 1):
-        pyplot.subplot(pred_time, 1, hours + 1)
-        pyplot.title(f'{hours + 1}h', y=0.5, loc='right')
-        pyplot.plot(yhat[:, hours], color='red', label='prediction')
-        pyplot.plot(test_y[:, hours], color='blue', label='fact')
+    pyplot.figure(figsize=(14, 6))
+
+    # set the val of axis
+    ax = pyplot.gca()
+    # 把x轴的刻度间隔设置为1，并存在变量里
+    x_major_locator = MultipleLocator(120)
+    # y_major_locator = MultipleLocator(0.1)
+    ax.xaxis.set_major_locator(x_major_locator)
+    # ax.yaxis.set_major_locator(y_major_locator)
+    # pyplot.ylim(0, 0.9)
+    pyplot.xlim(0, len(test_y) * 12)
+    pyplot.xlabel("test_hours")
+    pyplot.ylabel(f'{air_pollute_list[idx_target]}')
+
+    pyplot.title(f'test_{air_pollute_list[idx_target]}_{len(test_y)}_h', y=0.5, loc='center')
+    pyplot.plot(predict, color='red', label='predict')
+    pyplot.plot(test, color='blue', label='fact')
+    pyplot.savefig(f'./img/{air_pollute_list[idx_target]}_pic.png')
     pyplot.show()
-    pyplot.savefig(f'./img/new_{idx_target}.png')
 
 
 yhat = model.predict(test_x)
 yhat = yhat.reshape(yhat.shape[0], yhat.shape[2])
-show_hours_graph(yhat, test_y)
+predict_hours_of_96 = []
+test_hours_of_96 = []
+for i in range(len(test_y)):
+    for j in range(12):
+        predict_hours_of_96.append(yhat[i][j])
+        test_hours_of_96.append(test_y[i][j])
+predict_res, test_res = np.array(predict_hours_of_96), np.array(test_hours_of_96)
+pre, test = reverse_transform(var_origin[:, 0].T, predict_res), reverse_transform(var_origin[:, 0].T, test_res)
+show_graph(pre, test)
+
+cnt = 0
+for i in range(len(test_hours_of_96)):
+    if test_hours_of_96[i] * 0.80 <= predict_hours_of_96[i] <= test_hours_of_96[i] * 1.20:
+        cnt += 1
+print(cnt / len(test_hours_of_96))
+# show_hours_graph(yhat, test_y)
 
 # cal acc15
-true_cnt = [0 for _ in range(pred_time)]
-row, col = test_y.shape[0], test_y.shape[1]
-for i in range(col):
-    for j in range(row):
-        if test_y[j][i] * 0.80 <= yhat[j][i] <= test_y[j][i] * 1.20:
-            true_cnt[i] += 1
-    print(true_cnt[i] / row)
+# true_cnt = [0 for _ in range(pred_time)]
+# row, col = test_y.shape[0], test_y.shape[1]
+# for i in range(col):
+#     for j in range(row):
+#         if test_y[j][i] * 0.80 <= yhat[j][i] <= test_y[j][i] * 1.20:
+#             true_cnt[i] += 1
+#     print(true_cnt[i] / row)
